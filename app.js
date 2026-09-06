@@ -1,6 +1,9 @@
 import { createCollectorVisionScannerApplet } from "./collectorvision/lib/collectorvision-scanner-applet.mjs";
 
 const button = document.querySelector("#camera-button");
+const photoButton = document.querySelector("#photo-button");
+const photoInput = document.querySelector("#photo-input");
+const photoInfoEl = document.querySelector("#photo-info");
 const statusEl = document.querySelector("#status");
 const resultEl = document.querySelector("#result");
 const cardNameEl = document.querySelector("#card-name");
@@ -36,6 +39,8 @@ let lastNarratedAt = 0;
 let narrationLocked = false;
 let awaitingCardRemoval = false;
 let clearFrameCount = 0;
+let photoCapturing = false;
+let photoScanPending = false;
 
 function setStatus(message, { error = false } = {}) {
   statusEl.textContent = message;
@@ -45,6 +50,7 @@ function setStatus(message, { error = false } = {}) {
 function setRunningUi(running) {
   button.textContent = running ? "Parar câmera" : "Iniciar câmera";
   button.classList.toggle("is-running", running);
+  photoButton.disabled = !running || photoCapturing;
 }
 
 function formatProgress(data) {
@@ -118,13 +124,10 @@ function portugueseTypeLine(typeLine) {
     ["Enchantment", "Encantamento"],
     ["Instant", "Mágica instantânea"],
     ["Sorcery", "Feitiço"],
-    ["Planeswalker", "Planeswalker"],
     ["Land", "Terreno"],
     ["Battle", "Batalha"],
     ["Equipment", "Equipamento"],
     ["Vehicle", "Veículo"],
-    ["Aura", "Aura"],
-    ["Saga", "Saga"],
     ["Token", "Ficha"],
   ];
 
@@ -150,7 +153,7 @@ function localRulesSummary(oracleText) {
     [/\bmenace\b/i, "Tem ameaçar."],
     [/\bfirst strike\b/i, "Tem iniciativa."],
     [/\bdouble strike\b/i, "Tem golpe duplo."],
-    [/\bhexproof\b/i, "Não pode ser alvo de mágicas ou habilidades controladas pelos oponentes."],
+    [/\bhexproof\b/i, "Tem resistência a alvos dos oponentes."],
     [/\bindestructible\b/i, "É indestrutível."],
   ];
 
@@ -163,15 +166,12 @@ function localRulesSummary(oracleText) {
 
   const gainLife = source.match(/you gain (\d+) life/i);
   if (gainLife) parts.push(`Você ganha ${gainLife[1]} pontos de vida.`);
-
-  if (/draw a card/i.test(source)) parts.push("Você compra uma carta.");
   if (/draw two cards/i.test(source)) parts.push("Você compra duas cartas.");
+  else if (/draw a card/i.test(source)) parts.push("Você compra uma carta.");
   if (/destroy target/i.test(source)) parts.push("Possui um efeito que destrói um alvo.");
   if (/exile target/i.test(source)) parts.push("Possui um efeito que exila um alvo.");
   if (/create .* token/i.test(source)) parts.push("Possui um efeito que cria uma ficha.");
-  if (/when .* enters/i.test(source) || /when this .* enters/i.test(source)) {
-    parts.push("Possui uma habilidade que é ativada quando entra no campo de batalha.");
-  }
+  if (/when .* enters/i.test(source)) parts.push("Possui uma habilidade que dispara quando entra no campo de batalha.");
   if (/whenever/i.test(source)) parts.push("Possui uma habilidade desencadeada.");
   if (/\{T\}:/i.test(source)) parts.push("Possui uma habilidade ativada ao virar a carta.");
 
@@ -218,11 +218,7 @@ function releaseNarrationLock() {
 }
 
 function speakPortuguese(text) {
-  if (!("speechSynthesis" in window) || typeof SpeechSynthesisUtterance === "undefined") {
-    releaseNarrationLock();
-    return;
-  }
-  if (!text) {
+  if (!("speechSynthesis" in window) || typeof SpeechSynthesisUtterance === "undefined" || !text) {
     releaseNarrationLock();
     return;
   }
@@ -241,7 +237,6 @@ function speakPortuguese(text) {
   };
   utterance.onend = releaseNarrationLock;
   utterance.onerror = releaseNarrationLock;
-
   window.speechSynthesis.speak(utterance);
 }
 
@@ -281,7 +276,6 @@ async function narrateCard(data, fallbackCardId) {
   const now = Date.now();
   if (key && key === lastNarratedKey && now - lastNarratedAt < 12000) return;
 
-  // Trava antes da busca da impressão em português para impedir corridas entre scans.
   narrationLocked = true;
   lastNarratedKey = key;
   lastNarratedAt = now;
@@ -291,7 +285,6 @@ async function narrateCard(data, fallbackCardId) {
     const narration = portugueseCard
       ? narrationForCard(portugueseCard, { officialPortuguese: true })
       : narrationForCard(data, { officialPortuguese: false });
-
     speakPortuguese(narration);
   } catch (error) {
     console.warn("Falha ao preparar narração:", error);
@@ -304,7 +297,6 @@ async function showDetectedCard(card) {
 
   awaitingCardRemoval = true;
   clearFrameCount = 0;
-
   const sequence = ++lookupSequence;
   setStatus("Carta reconhecida. Buscando os dados…");
 
@@ -330,6 +322,121 @@ async function showDetectedCard(card) {
     resultEl.hidden = false;
     setStatus(error instanceof Error ? error.message : String(error), { error: true });
   }
+}
+
+function pauseAutoScan() {
+  if (scanner?.timer) {
+    clearInterval(scanner.timer);
+    scanner.timer = null;
+  }
+}
+
+function resumeAutoScan() {
+  if (scanner?.started && typeof scanner.restartTickLoop === "function") {
+    scanner.restartTickLoop();
+  }
+}
+
+async function waitForScannerIdle(timeoutMs = 3000) {
+  const startedAt = performance.now();
+  while (scanner?.workerBusy) {
+    if (performance.now() - startedAt > timeoutMs) return false;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return true;
+}
+
+async function cropBitmapToRegion(bitmap, region = CAPTURE_REGION) {
+  const x = Math.max(0, Math.min(1, Number(region.x) || 0));
+  const y = Math.max(0, Math.min(1, Number(region.y) || 0));
+  const width = Math.min(1 - x, Math.max(0.05, Number(region.width) || 1));
+  const height = Math.min(1 - y, Math.max(0.05, Number(region.height) || 1));
+  const sx = Math.round(bitmap.width * x);
+  const sy = Math.round(bitmap.height * y);
+  const sw = Math.max(1, Math.round(bitmap.width * width));
+  const sh = Math.max(1, Math.round(bitmap.height * height));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = sw;
+  canvas.height = sh;
+  canvas.getContext("2d", { alpha: false }).drawImage(bitmap, sx, sy, sw, sh, 0, 0, sw, sh);
+  return createImageBitmap(canvas);
+}
+
+async function sendPhotoToScanner(bitmap, { crop = true } = {}) {
+  if (!scanner?.ready || typeof scanner.scanBitmap !== "function") {
+    bitmap.close?.();
+    throw new Error("O modo Foto HD ainda não está pronto. Atualize a página e tente novamente.");
+  }
+
+  pauseAutoScan();
+  const idle = await waitForScannerIdle();
+  if (!idle) {
+    resumeAutoScan();
+    bitmap.close?.();
+    throw new Error("O scanner ainda está ocupado. Tente a foto novamente.");
+  }
+
+  let scanBitmap = bitmap;
+  if (crop) {
+    scanBitmap = await cropBitmapToRegion(bitmap);
+    bitmap.close?.();
+  }
+
+  photoScanPending = true;
+  const accepted = await scanner.scanBitmap(scanBitmap);
+  if (!accepted) {
+    photoScanPending = false;
+    resumeAutoScan();
+    throw new Error("Não consegui enviar a foto para o reconhecimento.");
+  }
+}
+
+async function captureMaximumResolutionPhoto() {
+  const track = scanner?.stream?.getVideoTracks?.()[0];
+  if (!track) throw new Error("Inicie a câmera antes de tirar a Foto HD.");
+  if (!("ImageCapture" in window)) return null;
+
+  const capture = new ImageCapture(track);
+  const capabilities = await capture.getPhotoCapabilities().catch(() => null);
+  const settings = {};
+  if (Number.isFinite(capabilities?.imageWidth?.max)) settings.imageWidth = Math.floor(capabilities.imageWidth.max);
+  if (Number.isFinite(capabilities?.imageHeight?.max)) settings.imageHeight = Math.floor(capabilities.imageHeight.max);
+
+  let blob;
+  try {
+    blob = await capture.takePhoto(settings);
+  } catch {
+    blob = await capture.takePhoto();
+  }
+
+  const bitmap = await createImageBitmap(blob);
+  return { bitmap, capabilities };
+}
+
+async function updatePhotoCapabilityInfo() {
+  const track = scanner?.stream?.getVideoTracks?.()[0];
+  if (!track) return;
+
+  const video = track.getSettings?.() ?? {};
+  const videoLabel = video.width && video.height ? `Vídeo ${video.width}×${video.height}` : "Vídeo ativo";
+
+  if (!("ImageCapture" in window)) {
+    photoInfoEl.textContent = `${videoLabel} · Foto HD usará a câmera nativa do aparelho.`;
+    return;
+  }
+
+  try {
+    const capture = new ImageCapture(track);
+    const caps = await capture.getPhotoCapabilities();
+    if (caps?.imageWidth?.max && caps?.imageHeight?.max) {
+      photoInfoEl.textContent = `${videoLabel} · Foto até ${Math.floor(caps.imageWidth.max)}×${Math.floor(caps.imageHeight.max)}`;
+      return;
+    }
+  } catch {
+    // Usa mensagem genérica abaixo.
+  }
+  photoInfoEl.textContent = `${videoLabel} · Foto HD disponível.`;
 }
 
 async function ensureScanner() {
@@ -367,6 +474,14 @@ async function ensureScanner() {
     onResult(data) {
       updateDiagnostics(data);
 
+      const wasPhoto = photoScanPending;
+      if (wasPhoto) {
+        photoScanPending = false;
+        photoCapturing = false;
+        photoButton.disabled = false;
+        resumeAutoScan();
+      }
+
       if (data?.cardPresent) {
         clearFrameCount = 0;
       } else {
@@ -382,18 +497,22 @@ async function ensureScanner() {
         setStatus("Narrando carta…");
         return;
       }
-
       if (awaitingCardRemoval) {
         setStatus("Remova a carta para ler a próxima.");
         return;
       }
-
+      if (wasPhoto && !data?.cardPresent) {
+        setStatus("A Foto HD não encontrou uma carta. Aproxime a carta e tente novamente.", { error: true });
+        return;
+      }
       if (!data?.cardPresent) {
         setStatus("Aguardando uma carta dentro da moldura…");
       } else if (!data?.cornersValid) {
-        setStatus("Vi uma carta. Mantenha-a inteira e parada dentro da área.");
+        setStatus(wasPhoto
+          ? "Foto HD feita, mas não encontrei os quatro cantos. Tente novamente com a carta inteira."
+          : "Vi uma carta. Mantenha-a inteira e parada dentro da área.");
       } else if (!Number.isFinite(data?.score) || data.score < MATCH_THRESHOLD) {
-        setStatus(`Foto capturada automaticamente. Identificando… score ${formatNumber(data?.score)}.`);
+        setStatus(`${wasPhoto ? "Foto HD" : "Foto automática"} identificando… score ${formatNumber(data?.score)}.`);
       }
     },
     onCardDetected(card) {
@@ -402,6 +521,10 @@ async function ensureScanner() {
       showDetectedCard(card);
     },
     onError({ message }) {
+      photoScanPending = false;
+      photoCapturing = false;
+      photoButton.disabled = !scanner?.started;
+      resumeAutoScan();
       setStatus(message || "Erro no scanner.", { error: true });
     },
   });
@@ -418,7 +541,10 @@ button.addEventListener("click", async () => {
     narrationLocked = false;
     awaitingCardRemoval = false;
     clearFrameCount = 0;
+    photoCapturing = false;
+    photoScanPending = false;
     setRunningUi(false);
+    photoInfoEl.textContent = "";
     setStatus("Câmera parada.");
     return;
   }
@@ -431,18 +557,15 @@ button.addEventListener("click", async () => {
     const instance = await ensureScanner();
     await instance.start();
     setRunningUi(true);
+    await updatePhotoCapabilityInfo();
     setStatus(instance.ready
       ? "Coloque a carta inteira dentro da moldura. A captura é automática."
       : "Câmera pronta. Carregando reconhecimento…");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const missingAssets = /manifest|404|fetch/i.test(message);
-    setStatus(
-      missingAssets
-        ? "Não foi possível carregar os modelos do CollectorVision. Atualize a página e tente novamente."
-        : message,
-      { error: true },
-    );
+    setStatus(/manifest|404|fetch/i.test(message)
+      ? "Não foi possível carregar os modelos do CollectorVision. Atualize a página e tente novamente."
+      : message, { error: true });
     scanner?.dispose?.();
     scanner = null;
     setRunningUi(false);
@@ -452,6 +575,65 @@ button.addEventListener("click", async () => {
   }
 });
 
+photoButton.addEventListener("click", async () => {
+  if (!scanner?.started || photoCapturing) return;
+  if (narrationLocked || awaitingCardRemoval) {
+    setStatus("Termine a carta atual e remova-a antes de tirar outra foto.");
+    return;
+  }
+
+  if (!("ImageCapture" in window)) {
+    photoInput.click();
+    return;
+  }
+
+  photoCapturing = true;
+  photoButton.disabled = true;
+  setStatus("Tirando Foto HD na maior resolução disponível…");
+
+  try {
+    const captured = await captureMaximumResolutionPhoto();
+    if (!captured) {
+      photoCapturing = false;
+      photoButton.disabled = false;
+      photoInput.click();
+      return;
+    }
+
+    setStatus(`Foto HD ${captured.bitmap.width}×${captured.bitmap.height} capturada. Reconhecendo…`);
+    await sendPhotoToScanner(captured.bitmap, { crop: true });
+  } catch (error) {
+    photoCapturing = false;
+    photoScanPending = false;
+    photoButton.disabled = false;
+    resumeAutoScan();
+    setStatus(error instanceof Error ? error.message : String(error), { error: true });
+  }
+});
+
+photoInput.addEventListener("change", async () => {
+  const file = photoInput.files?.[0];
+  photoInput.value = "";
+  if (!file) return;
+
+  photoCapturing = true;
+  photoButton.disabled = true;
+  setStatus("Carregando foto em alta resolução…");
+
+  try {
+    const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+    setStatus(`Foto ${bitmap.width}×${bitmap.height} carregada. Reconhecendo…`);
+    await sendPhotoToScanner(bitmap, { crop: true });
+  } catch (error) {
+    photoCapturing = false;
+    photoScanPending = false;
+    photoButton.disabled = false;
+    resumeAutoScan();
+    setStatus(error instanceof Error ? error.message : String(error), { error: true });
+  }
+});
+
+photoButton.disabled = true;
 updateDiagnostics();
 
 if ("serviceWorker" in navigator) {
