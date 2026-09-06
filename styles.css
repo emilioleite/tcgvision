@@ -78,12 +78,12 @@ h1 { margin-bottom: 0; font-size: clamp(1.65rem, 7vw, 2.4rem); line-height: 1; }
   z-index: 5;
   left: 50%;
   top: 50%;
-  width: min(32%, 150px);
+  width: min(38%, 170px);
   aspect-ratio: 63 / 88;
   transform: translate(-50%, -50%);
   border: 2px solid rgba(255, 255, 255, 0.88);
   border-radius: 9px;
-  box-shadow: 0 0 0 999px rgba(0, 0, 0, 0.16);
+  box-shadow: 0 0 0 999px rgba(0, 0, 0, 0.12);
   pointer-events: none;
 }
 
@@ -122,6 +122,35 @@ h1 { margin-bottom: 0; font-size: clamp(1.65rem, 7vw, 2.4rem); line-height: 1; }
   font-size: 0.88rem;
 }
 .status.error { color: var(--danger); }
+
+.diagnostics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+.diagnostics > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-soft);
+}
+.diagnostics span {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+.diagnostics strong {
+  overflow: hidden;
+  color: #f7f8fb;
+  font-size: 0.86rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.diagnostics .diag-wide { grid-column: 1 / -1; }
 
 .result-card {
   margin-top: 14px;
