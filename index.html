@@ -24,25 +24,23 @@
       <div id="scanner-wrap" class="scanner-wrap">
         <div id="scanner" class="scanner"></div>
         <div class="guide" aria-hidden="true">
-          <span>Posicione a carta aqui</span>
+          <span>Deixe a carta inteira aqui</span>
         </div>
       </div>
 
-      <button id="camera-button" class="camera-button" type="button">
-        Iniciar câmera
-      </button>
+      <button id="camera-button" class="camera-button" type="button">Iniciar câmera</button>
 
       <p id="status" class="status" role="status" aria-live="polite">
         Toque em “Iniciar câmera” para começar.
       </p>
+    </section>
 
-      <div class="diagnostics" aria-label="Diagnóstico do reconhecimento">
-        <div><span>Carta no frame</span><strong id="diag-present">—</strong></div>
-        <div><span>Cantos válidos</span><strong id="diag-corners">—</strong></div>
-        <div><span>Sinal dos cantos</span><strong id="diag-corner-score">—</strong></div>
-        <div><span>Score da carta</span><strong id="diag-match-score">—</strong></div>
-        <div class="diag-wide"><span>Candidato</span><strong id="diag-card-id">—</strong></div>
-      </div>
+    <section class="diagnostics" aria-label="Diagnóstico do reconhecimento">
+      <div><span>Carta no frame</span><strong id="diag-present">—</strong></div>
+      <div><span>Cantos válidos</span><strong id="diag-corners">—</strong></div>
+      <div><span>Sinal dos cantos</span><strong id="diag-corner-score">—</strong></div>
+      <div><span>Score da carta</span><strong id="diag-match-score">—</strong></div>
+      <div class="diag-card"><span>Candidato</span><strong id="diag-card-id">—</strong></div>
     </section>
 
     <section id="result" class="result-card" hidden aria-live="polite">
@@ -56,7 +54,7 @@
     </section>
 
     <p class="hint">
-      Modo de teste: mantenha os quatro cantos visíveis, deixe a carta ocupar boa parte do quadro e segure-a parada por alguns instantes.
+      Não precisa encaixar a carta nas bordas. Basta deixá-la inteira dentro da moldura e segurá-la por um instante; o app captura a região automaticamente.
     </p>
   </main>
 
