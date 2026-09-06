@@ -14,6 +14,15 @@ const diagCardIdEl = document.querySelector("#diag-card-id");
 
 const MATCH_THRESHOLD = 0.45;
 
+// Região real analisada pelo modelo. Ela é propositalmente um pouco maior
+// que a moldura visível para o jogador não precisar encaixar a carta exatamente.
+const CAPTURE_REGION = {
+  x: 0.30,
+  y: 0.04,
+  width: 0.40,
+  height: 0.92,
+};
+
 let scanner = null;
 let starting = false;
 let lookupSequence = 0;
@@ -144,7 +153,7 @@ async function ensureScanner() {
     workerUrl: "./collectorvision/scanner.worker.mjs",
     autoStart: false,
     enableWebGpu: false,
-    scanIntervalMs: 500,
+    scanIntervalMs: 400,
     minCornerConfidence: 0.02,
     matchThreshold: MATCH_THRESHOLD,
     consecutiveMatches: 1,
@@ -152,6 +161,7 @@ async function ensureScanner() {
     groupBySecondaryId: true,
     showFpsOverlay: true,
     overlay: true,
+    captureRegion: CAPTURE_REGION,
     camera: {
       facingMode: { ideal: "environment" },
       width: { ideal: 1280 },
@@ -161,17 +171,19 @@ async function ensureScanner() {
       setStatus(formatProgress(data));
     },
     onReady() {
-      setStatus(scanner?.started ? "Aponte a câmera para uma carta." : "Reconhecimento pronto.");
+      setStatus(scanner?.started
+        ? "Coloque a carta inteira dentro da moldura. A captura é automática."
+        : "Reconhecimento pronto.");
     },
     onResult(data) {
       updateDiagnostics(data);
 
       if (!data?.cardPresent) {
-        setStatus("Procurando uma carta…");
+        setStatus("Aguardando uma carta dentro da moldura…");
       } else if (!data?.cornersValid) {
-        setStatus("Carta encontrada. Mantenha os 4 cantos inteiros e parada.");
+        setStatus("Vi uma carta. Mantenha-a inteira e parada dentro da área.");
       } else if (!Number.isFinite(data?.score) || data.score < MATCH_THRESHOLD) {
-        setStatus(`Carta detectada. Identificando… score ${formatNumber(data?.score)}.`);
+        setStatus(`Foto capturada automaticamente. Identificando… score ${formatNumber(data?.score)}.`);
       }
     },
     onCardDetected(card) {
@@ -205,7 +217,9 @@ button.addEventListener("click", async () => {
     const instance = await ensureScanner();
     await instance.start();
     setRunningUi(true);
-    setStatus(instance.ready ? "Aponte a câmera para uma carta." : "Câmera pronta. Carregando reconhecimento…");
+    setStatus(instance.ready
+      ? "Coloque a carta inteira dentro da moldura. A captura é automática."
+      : "Câmera pronta. Carregando reconhecimento…");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const missingAssets = /manifest|404|fetch/i.test(message);
