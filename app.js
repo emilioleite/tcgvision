@@ -10,6 +10,8 @@ const cardConfidenceEl = document.querySelector("#card-confidence");
 let scanner = null;
 let starting = false;
 let lookupSequence = 0;
+let lastNarratedKey = "";
+let lastNarratedAt = 0;
 
 function setStatus(message, { error = false } = {}) {
   statusEl.textContent = message;
@@ -30,6 +32,63 @@ function formatProgress(data) {
   return "Preparando reconhecimento…";
 }
 
+function speechLanguageForCard(data) {
+  const lang = String(data?.lang ?? "en").toLowerCase();
+  if (lang === "pt") return "pt-BR";
+  if (lang === "es") return "es-ES";
+  if (lang === "fr") return "fr-FR";
+  if (lang === "de") return "de-DE";
+  if (lang === "it") return "it-IT";
+  if (lang === "ja") return "ja-JP";
+  return "en-US";
+}
+
+function cleanForSpeech(value) {
+  return String(value ?? "")
+    .replace(/[{}]/g, " ")
+    .replace(/\//g, " ")
+    .replace(/\n+/g, ". ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function narrationForCard(data) {
+  const name = data.printed_name || data.name || "Carta reconhecida";
+  const mana = cleanForSpeech(data.mana_cost);
+  const typeLine = data.printed_type_line || data.type_line || "";
+  const text = data.printed_text || data.oracle_text || "";
+
+  return [
+    cleanForSpeech(name),
+    mana ? `Mana ${mana}` : "",
+    cleanForSpeech(typeLine),
+    cleanForSpeech(text),
+  ].filter(Boolean).join(". ");
+}
+
+function narrateCard(data, fallbackCardId) {
+  if (!("speechSynthesis" in window) || typeof SpeechSynthesisUtterance === "undefined") return;
+
+  const key = String(data?.oracle_id || data?.id || fallbackCardId || data?.name || "");
+  const now = Date.now();
+
+  // Evita repetir a narração se a mesma carta continuar parada diante da câmera.
+  if (key && key === lastNarratedKey && now - lastNarratedAt < 12000) return;
+
+  const text = narrationForCard(data);
+  if (!text) return;
+
+  lastNarratedKey = key;
+  lastNarratedAt = now;
+
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = speechLanguageForCard(data);
+  utterance.rate = 0.95;
+  utterance.pitch = 1;
+  window.speechSynthesis.speak(utterance);
+}
+
 async function showDetectedCard(card) {
   const sequence = ++lookupSequence;
   setStatus("Carta reconhecida. Buscando o nome…");
@@ -40,13 +99,14 @@ async function showDetectedCard(card) {
     const data = await response.json();
     if (sequence !== lookupSequence) return;
 
-    cardNameEl.textContent = data.name || card.cardId;
+    cardNameEl.textContent = data.printed_name || data.name || card.cardId;
     const setName = data.set_name || data.set?.toUpperCase?.() || "";
     const collectorNumber = data.collector_number ? ` #${data.collector_number}` : "";
     cardSetEl.textContent = `${setName}${collectorNumber}`.trim();
     cardConfidenceEl.textContent = `${Math.round(card.score * 100)}%`;
     resultEl.hidden = false;
     setStatus("Pronto para a próxima carta.");
+    narrateCard(data, card.cardId);
   } catch (error) {
     if (sequence !== lookupSequence) return;
     cardNameEl.textContent = card.cardId;
@@ -111,6 +171,7 @@ button.addEventListener("click", async () => {
 
   if (scanner?.started) {
     scanner.stop();
+    window.speechSynthesis?.cancel?.();
     setRunningUi(false);
     setStatus("Câmera parada.");
     return;
