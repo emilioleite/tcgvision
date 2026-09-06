@@ -50,7 +50,7 @@ function setStatus(message, { error = false } = {}) {
 function setRunningUi(running) {
   button.textContent = running ? "Parar câmera" : "Iniciar câmera";
   button.classList.toggle("is-running", running);
-  photoButton.disabled = !running || photoCapturing;
+  photoButton.disabled = photoCapturing;
 }
 
 function formatProgress(data) {
@@ -346,24 +346,25 @@ async function waitForScannerIdle(timeoutMs = 3000) {
   return true;
 }
 
-async function cropBitmapToRegion(bitmap, region = CAPTURE_REGION) {
-  const x = Math.max(0, Math.min(1, Number(region.x) || 0));
-  const y = Math.max(0, Math.min(1, Number(region.y) || 0));
-  const width = Math.min(1 - x, Math.max(0.05, Number(region.width) || 1));
-  const height = Math.min(1 - y, Math.max(0.05, Number(region.height) || 1));
-  const sx = Math.round(bitmap.width * x);
-  const sy = Math.round(bitmap.height * y);
-  const sw = Math.max(1, Math.round(bitmap.width * width));
-  const sh = Math.max(1, Math.round(bitmap.height * height));
+async function waitForScannerReady(instance, timeoutMs = 90000) {
+  if (instance?.ready) return true;
 
-  const canvas = document.createElement("canvas");
-  canvas.width = sw;
-  canvas.height = sh;
-  canvas.getContext("2d", { alpha: false }).drawImage(bitmap, sx, sy, sw, sh, 0, 0, sw, sh);
-  return createImageBitmap(canvas);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      instance?.removeEventListener?.("ready", onReady);
+      reject(new Error("Os modelos demoraram demais para carregar. Tente novamente."));
+    }, timeoutMs);
+
+    const onReady = () => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+
+    instance.addEventListener("ready", onReady, { once: true });
+  });
 }
 
-async function sendPhotoToScanner(bitmap, { crop = true } = {}) {
+async function sendPhotoToScanner(bitmap) {
   if (!scanner?.ready || typeof scanner.scanBitmap !== "function") {
     bitmap.close?.();
     throw new Error("O modo Foto HD ainda não está pronto. Atualize a página e tente novamente.");
@@ -377,66 +378,13 @@ async function sendPhotoToScanner(bitmap, { crop = true } = {}) {
     throw new Error("O scanner ainda está ocupado. Tente a foto novamente.");
   }
 
-  let scanBitmap = bitmap;
-  if (crop) {
-    scanBitmap = await cropBitmapToRegion(bitmap);
-    bitmap.close?.();
-  }
-
   photoScanPending = true;
-  const accepted = await scanner.scanBitmap(scanBitmap);
+  const accepted = await scanner.scanBitmap(bitmap);
   if (!accepted) {
     photoScanPending = false;
     resumeAutoScan();
     throw new Error("Não consegui enviar a foto para o reconhecimento.");
   }
-}
-
-async function captureMaximumResolutionPhoto() {
-  const track = scanner?.stream?.getVideoTracks?.()[0];
-  if (!track) throw new Error("Inicie a câmera antes de tirar a Foto HD.");
-  if (!("ImageCapture" in window)) return null;
-
-  const capture = new ImageCapture(track);
-  const capabilities = await capture.getPhotoCapabilities().catch(() => null);
-  const settings = {};
-  if (Number.isFinite(capabilities?.imageWidth?.max)) settings.imageWidth = Math.floor(capabilities.imageWidth.max);
-  if (Number.isFinite(capabilities?.imageHeight?.max)) settings.imageHeight = Math.floor(capabilities.imageHeight.max);
-
-  let blob;
-  try {
-    blob = await capture.takePhoto(settings);
-  } catch {
-    blob = await capture.takePhoto();
-  }
-
-  const bitmap = await createImageBitmap(blob);
-  return { bitmap, capabilities };
-}
-
-async function updatePhotoCapabilityInfo() {
-  const track = scanner?.stream?.getVideoTracks?.()[0];
-  if (!track) return;
-
-  const video = track.getSettings?.() ?? {};
-  const videoLabel = video.width && video.height ? `Vídeo ${video.width}×${video.height}` : "Vídeo ativo";
-
-  if (!("ImageCapture" in window)) {
-    photoInfoEl.textContent = `${videoLabel} · Foto HD usará a câmera nativa do aparelho.`;
-    return;
-  }
-
-  try {
-    const capture = new ImageCapture(track);
-    const caps = await capture.getPhotoCapabilities();
-    if (caps?.imageWidth?.max && caps?.imageHeight?.max) {
-      photoInfoEl.textContent = `${videoLabel} · Foto até ${Math.floor(caps.imageWidth.max)}×${Math.floor(caps.imageHeight.max)}`;
-      return;
-    }
-  } catch {
-    // Usa mensagem genérica abaixo.
-  }
-  photoInfoEl.textContent = `${videoLabel} · Foto HD disponível.`;
 }
 
 async function ensureScanner() {
@@ -467,9 +415,13 @@ async function ensureScanner() {
       setStatus(formatProgress(data));
     },
     onReady() {
-      setStatus(scanner?.started
-        ? "Coloque a carta inteira dentro da moldura. A captura é automática."
-        : "Reconhecimento pronto.");
+      if (photoCapturing) {
+        setStatus("Modelos prontos. Analisando a Foto HD…");
+      } else {
+        setStatus(scanner?.started
+          ? "Coloque a carta inteira dentro da moldura. A captura é automática."
+          : "Reconhecimento pronto. Você pode usar Foto HD sem iniciar o vídeo.");
+      }
     },
     onResult(data) {
       updateDiagnostics(data);
@@ -502,14 +454,16 @@ async function ensureScanner() {
         return;
       }
       if (wasPhoto && !data?.cardPresent) {
-        setStatus("A Foto HD não encontrou uma carta. Aproxime a carta e tente novamente.", { error: true });
+        setStatus("A Foto HD não encontrou uma carta. Tente preencher mais da foto com a carta e fotografar novamente.", { error: true });
         return;
       }
       if (!data?.cardPresent) {
-        setStatus("Aguardando uma carta dentro da moldura…");
+        setStatus(scanner?.started
+          ? "Aguardando uma carta dentro da moldura…"
+          : "Foto processada. Toque em Foto HD para tentar outra.");
       } else if (!data?.cornersValid) {
         setStatus(wasPhoto
-          ? "Foto HD feita, mas não encontrei os quatro cantos. Tente novamente com a carta inteira."
+          ? "Foto HD feita, mas não encontrei os quatro cantos. Fotografe a carta inteira, ocupando boa parte da tela."
           : "Vi uma carta. Mantenha-a inteira e parada dentro da área.");
       } else if (!Number.isFinite(data?.score) || data.score < MATCH_THRESHOLD) {
         setStatus(`${wasPhoto ? "Foto HD" : "Foto automática"} identificando… score ${formatNumber(data?.score)}.`);
@@ -523,7 +477,7 @@ async function ensureScanner() {
     onError({ message }) {
       photoScanPending = false;
       photoCapturing = false;
-      photoButton.disabled = !scanner?.started;
+      photoButton.disabled = false;
       resumeAutoScan();
       setStatus(message || "Erro no scanner.", { error: true });
     },
@@ -541,11 +495,10 @@ button.addEventListener("click", async () => {
     narrationLocked = false;
     awaitingCardRemoval = false;
     clearFrameCount = 0;
-    photoCapturing = false;
     photoScanPending = false;
     setRunningUi(false);
-    photoInfoEl.textContent = "";
-    setStatus("Câmera parada.");
+    photoInfoEl.textContent = "Foto HD abre a câmera nativa e usa a imagem inteira.";
+    setStatus("Câmera de vídeo parada. Foto HD continua disponível.");
     return;
   }
 
@@ -557,7 +510,10 @@ button.addEventListener("click", async () => {
     const instance = await ensureScanner();
     await instance.start();
     setRunningUi(true);
-    await updatePhotoCapabilityInfo();
+    const settings = instance.stream?.getVideoTracks?.()[0]?.getSettings?.() ?? {};
+    photoInfoEl.textContent = settings.width && settings.height
+      ? `Vídeo ${settings.width}×${settings.height} · Foto HD usa a câmera nativa em resolução fotográfica.`
+      : "Foto HD usa a câmera nativa em resolução fotográfica.";
     setStatus(instance.ready
       ? "Coloque a carta inteira dentro da moldura. A captura é automática."
       : "Câmera pronta. Carregando reconhecimento…");
@@ -575,40 +531,17 @@ button.addEventListener("click", async () => {
   }
 });
 
-photoButton.addEventListener("click", async () => {
-  if (!scanner?.started || photoCapturing) return;
+photoButton.addEventListener("click", () => {
+  if (photoCapturing) return;
   if (narrationLocked || awaitingCardRemoval) {
-    setStatus("Termine a carta atual e remova-a antes de tirar outra foto.");
+    setStatus("Termine a carta atual antes de fotografar outra.");
     return;
   }
 
-  if (!("ImageCapture" in window)) {
-    photoInput.click();
-    return;
-  }
-
-  photoCapturing = true;
-  photoButton.disabled = true;
-  setStatus("Tirando Foto HD na maior resolução disponível…");
-
-  try {
-    const captured = await captureMaximumResolutionPhoto();
-    if (!captured) {
-      photoCapturing = false;
-      photoButton.disabled = false;
-      photoInput.click();
-      return;
-    }
-
-    setStatus(`Foto HD ${captured.bitmap.width}×${captured.bitmap.height} capturada. Reconhecendo…`);
-    await sendPhotoToScanner(captured.bitmap, { crop: true });
-  } catch (error) {
-    photoCapturing = false;
-    photoScanPending = false;
-    photoButton.disabled = false;
-    resumeAutoScan();
-    setStatus(error instanceof Error ? error.message : String(error), { error: true });
-  }
+  // capture="environment" pede ao navegador a câmera traseira nativa.
+  // Em Android normalmente abre a interface de câmera em tela cheia.
+  photoInput.value = "";
+  photoInput.click();
 });
 
 photoInput.addEventListener("change", async () => {
@@ -618,12 +551,19 @@ photoInput.addEventListener("change", async () => {
 
   photoCapturing = true;
   photoButton.disabled = true;
-  setStatus("Carregando foto em alta resolução…");
+  setStatus("Foto tirada. Preparando reconhecimento em alta resolução…");
 
   try {
+    const instance = await ensureScanner();
+    if (!instance.ready) {
+      setStatus("Foto salva. Carregando os modelos de reconhecimento…");
+      await waitForScannerReady(instance);
+    }
+
     const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
-    setStatus(`Foto ${bitmap.width}×${bitmap.height} carregada. Reconhecendo…`);
-    await sendPhotoToScanner(bitmap, { crop: true });
+    photoInfoEl.textContent = `Última Foto HD: ${bitmap.width}×${bitmap.height} · imagem inteira analisada.`;
+    setStatus(`Foto ${bitmap.width}×${bitmap.height} carregada. Analisando a imagem inteira…`);
+    await sendPhotoToScanner(bitmap);
   } catch (error) {
     photoCapturing = false;
     photoScanPending = false;
@@ -633,7 +573,8 @@ photoInput.addEventListener("change", async () => {
   }
 });
 
-photoButton.disabled = true;
+photoButton.disabled = false;
+photoInfoEl.textContent = "Foto HD abre a câmera nativa e usa a imagem inteira em resolução fotográfica.";
 updateDiagnostics();
 
 if ("serviceWorker" in navigator) {
