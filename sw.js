@@ -1,9 +1,9 @@
-const CACHE_NAME = "tcgvision-shell-v14";
+const CACHE_NAME = "tcgvision-shell-v15";
 const SHELL = [
   "./",
   "./index.html",
   "./styles.css?v=14",
-  "./app.js?v=14",
+  "./app.js?v=15",
   "./manifest.webmanifest",
   "./icon.svg",
 ];
