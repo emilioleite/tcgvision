@@ -8,7 +8,19 @@
   <title>TCG Vision</title>
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./styles.css?v=11">
+  <script>
+    // Durante o MVP, evita que um service worker antigo mantenha app.js em cache.
+    (async () => {
+      if (!("serviceWorker" in navigator)) return;
+      const params = new URLSearchParams(location.search);
+      if (params.get("fresh") !== "1") return;
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((reg) => reg.unregister()));
+      const keys = await caches.keys();
+      await Promise.all(keys.filter((key) => key.startsWith("tcgvision-")).map((key) => caches.delete(key)));
+    })().catch(console.warn);
+  </script>
 </head>
 <body>
   <main class="app-shell">
@@ -58,6 +70,6 @@
     </p>
   </main>
 
-  <script type="module" src="./app.js"></script>
+  <script type="module" src="./app.js?v=11"></script>
 </body>
 </html>
