@@ -1,9 +1,9 @@
-const CACHE_NAME = "tcgvision-shell-v9";
+const CACHE_NAME = "tcgvision-shell-v11";
 const SHELL = [
   "./",
   "./index.html",
-  "./styles.css",
-  "./app.js",
+  "./styles.css?v=11",
+  "./app.js?v=11",
   "./manifest.webmanifest",
   "./icon.svg",
 ];
@@ -16,7 +16,8 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys().then((keys) => Promise.all(
-      keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)),
+      keys.filter((key) => key.startsWith("tcgvision-") && key !== CACHE_NAME)
+        .map((key) => caches.delete(key)),
     )),
   );
   self.clients.claim();
@@ -29,17 +30,19 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
-  if (url.pathname.includes("/collectorvision/assets/") || url.pathname.includes("/collectorvision/vendor/")) {
-    return;
-  }
+  // Modelos/runtime têm cache próprio no CollectorVision/IndexedDB.
+  if (url.pathname.includes("/collectorvision/")) return;
 
+  // Durante o MVP, prioriza sempre a rede para não prender código antigo.
   event.respondWith(
-    caches.match(request).then((cached) => cached || fetch(request).then((response) => {
-      if (response.ok) {
-        const copy = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
-      }
-      return response;
-    })),
+    fetch(request)
+      .then((response) => {
+        if (response.ok) {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+        }
+        return response;
+      })
+      .catch(() => caches.match(request)),
   );
 });
