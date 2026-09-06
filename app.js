@@ -6,6 +6,13 @@ const resultEl = document.querySelector("#result");
 const cardNameEl = document.querySelector("#card-name");
 const cardSetEl = document.querySelector("#card-set");
 const cardConfidenceEl = document.querySelector("#card-confidence");
+const diagPresentEl = document.querySelector("#diag-present");
+const diagCornersEl = document.querySelector("#diag-corners");
+const diagCornerScoreEl = document.querySelector("#diag-corner-score");
+const diagMatchScoreEl = document.querySelector("#diag-match-score");
+const diagCardIdEl = document.querySelector("#diag-card-id");
+
+const MATCH_THRESHOLD = 0.45;
 
 let scanner = null;
 let starting = false;
@@ -30,6 +37,18 @@ function formatProgress(data) {
     return "Carregando modelos de reconhecimento…";
   }
   return "Preparando reconhecimento…";
+}
+
+function formatNumber(value, digits = 3) {
+  return Number.isFinite(value) ? Number(value).toFixed(digits) : "—";
+}
+
+function updateDiagnostics(data = {}) {
+  diagPresentEl.textContent = data.cardPresent === true ? "SIM" : data.cardPresent === false ? "NÃO" : "—";
+  diagCornersEl.textContent = data.cornersValid === true ? "SIM" : data.cornersValid === false ? "NÃO" : "—";
+  diagCornerScoreEl.textContent = formatNumber(data.confidence);
+  diagMatchScoreEl.textContent = formatNumber(data.score);
+  diagCardIdEl.textContent = data.cardId || "—";
 }
 
 function speechLanguageForCard(data) {
@@ -71,8 +90,6 @@ function narrateCard(data, fallbackCardId) {
 
   const key = String(data?.oracle_id || data?.id || fallbackCardId || data?.name || "");
   const now = Date.now();
-
-  // Evita repetir a narração se a mesma carta continuar parada diante da câmera.
   if (key && key === lastNarratedKey && now - lastNarratedAt < 12000) return;
 
   const text = narrationForCard(data);
@@ -127,18 +144,18 @@ async function ensureScanner() {
     workerUrl: "./collectorvision/scanner.worker.mjs",
     autoStart: false,
     enableWebGpu: false,
-    scanIntervalMs: 700,
+    scanIntervalMs: 500,
     minCornerConfidence: 0.02,
-    matchThreshold: 0.50,
-    consecutiveMatches: 2,
-    cooldownMs: 2800,
+    matchThreshold: MATCH_THRESHOLD,
+    consecutiveMatches: 1,
+    cooldownMs: 2200,
     groupBySecondaryId: true,
-    showFpsOverlay: false,
+    showFpsOverlay: true,
     overlay: true,
     camera: {
       facingMode: { ideal: "environment" },
-      width: { ideal: 1920 },
-      height: { ideal: 1080 },
+      width: { ideal: 1280 },
+      height: { ideal: 720 },
     },
     onProgress(data) {
       setStatus(formatProgress(data));
@@ -147,15 +164,18 @@ async function ensureScanner() {
       setStatus(scanner?.started ? "Aponte a câmera para uma carta." : "Reconhecimento pronto.");
     },
     onResult(data) {
+      updateDiagnostics(data);
+
       if (!data?.cardPresent) {
         setStatus("Procurando uma carta…");
       } else if (!data?.cornersValid) {
-        setStatus("Carta encontrada. Mantenha-a inteira e parada.");
-      } else if (!Number.isFinite(data?.score) || data.score < 0.50) {
-        setStatus("Carta detectada. Tentando identificar…");
+        setStatus("Carta encontrada. Mantenha os 4 cantos inteiros e parada.");
+      } else if (!Number.isFinite(data?.score) || data.score < MATCH_THRESHOLD) {
+        setStatus(`Carta detectada. Identificando… score ${formatNumber(data?.score)}.`);
       }
     },
     onCardDetected(card) {
+      updateDiagnostics(card.raw || card);
       showDetectedCard(card);
     },
     onError({ message }) {
@@ -203,6 +223,8 @@ button.addEventListener("click", async () => {
     button.disabled = false;
   }
 });
+
+updateDiagnostics();
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
