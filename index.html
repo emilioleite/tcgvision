@@ -35,6 +35,14 @@
       <p id="status" class="status" role="status" aria-live="polite">
         Toque em “Iniciar câmera” para começar.
       </p>
+
+      <div class="diagnostics" aria-label="Diagnóstico do reconhecimento">
+        <div><span>Carta no frame</span><strong id="diag-present">—</strong></div>
+        <div><span>Cantos válidos</span><strong id="diag-corners">—</strong></div>
+        <div><span>Sinal dos cantos</span><strong id="diag-corner-score">—</strong></div>
+        <div><span>Score da carta</span><strong id="diag-match-score">—</strong></div>
+        <div class="diag-wide"><span>Candidato</span><strong id="diag-card-id">—</strong></div>
+      </div>
     </section>
 
     <section id="result" class="result-card" hidden aria-live="polite">
@@ -48,7 +56,7 @@
     </section>
 
     <p class="hint">
-      Para o primeiro teste, segure a carta inteira e parada diante da câmera até o contorno ficar estável.
+      Modo de teste: mantenha os quatro cantos visíveis, deixe a carta ocupar boa parte do quadro e segure-a parada por alguns instantes.
     </p>
   </main>
 
