@@ -27,7 +27,7 @@ curl -fsSL "${RAW_BASE}/lib/collectorvision-scanner-applet.mjs" -o "${TARGET_DIR
 curl -fsSL "${RAW_BASE}/lib/collectorvision-catalog-v2.mjs" -o "${TARGET_DIR}/lib/collectorvision-catalog-v2.mjs"
 curl -fsSL "https://raw.githubusercontent.com/${UPSTREAM_REPO}/${UPSTREAM_REF}/LICENSE" -o "${TARGET_DIR}/LICENSE"
 
-echo "Aplicando suporte à região central de captura…"
+echo "Aplicando suporte à região central e fotos de alta resolução…"
 python3 - "${TARGET_DIR}/lib/collectorvision-scanner-applet.mjs" <<'PY'
 from pathlib import Path
 import sys
@@ -114,10 +114,35 @@ new_overlay = '''      const region = this.config.captureRegion;
       const py = (ry + clamp01(y) * rh) * height;
 '''
 
+scan_method = '''  async scanBitmap(bitmap) {
+    if (!bitmap) {
+      throw new Error("scanBitmap requires an ImageBitmap.");
+    }
+    if (!this.ready || !this.worker || this.workerBusy) {
+      bitmap.close?.();
+      return false;
+    }
+
+    this.workerBusy = true;
+    try {
+      this.worker.postMessage({ type: "frame", bitmap }, [bitmap]);
+      return true;
+    } catch (error) {
+      this.workerBusy = false;
+      bitmap.close?.();
+      this.handleError(error);
+      return false;
+    }
+  }
+
+  async tick() {
+'''
+
 for old, new, label in [
     (old_capture, new_capture, "drawCaptureFrame"),
     (old_resize, new_resize, "resizeCanvas"),
     (old_overlay, new_overlay, "drawOverlay"),
+    ("  async tick() {\n", scan_method, "scanBitmap"),
 ]:
     if old not in text:
         raise SystemExit(f"CollectorVision upstream mudou: trecho {label} não encontrado")
