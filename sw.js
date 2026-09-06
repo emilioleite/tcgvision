@@ -1,4 +1,4 @@
-const CACHE_NAME = "tcgvision-shell-v3";
+const CACHE_NAME = "tcgvision-shell-v4";
 const SHELL = [
   "./",
   "./index.html",
@@ -29,8 +29,6 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
-  // Modelos e runtime WASM já têm cache próprio no CollectorVision/IndexedDB.
-  // Evitamos duplicar os arquivos grandes no Cache Storage do PWA.
   if (url.pathname.includes("/collectorvision/assets/") || url.pathname.includes("/collectorvision/vendor/")) {
     return;
   }
