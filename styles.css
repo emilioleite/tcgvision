@@ -115,23 +115,60 @@ h1 { margin-bottom: 0; font-size: clamp(1.65rem, 7vw, 2.4rem); line-height: 1; }
   font-size: 0.72rem;
 }
 
-.camera-button {
-  width: 100%;
+.camera-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
   margin-top: 12px;
-  padding: 14px 18px;
+}
+
+.camera-button, .photo-button {
+  min-height: 48px;
+  padding: 13px 16px;
   border: 0;
   border-radius: 13px;
-  background: var(--accent-strong);
-  color: #052e22;
   font-weight: 900;
   cursor: pointer;
 }
-.camera-button:disabled { opacity: 0.55; cursor: wait; }
+
+.camera-button {
+  background: var(--accent-strong);
+  color: #052e22;
+}
 .camera-button.is-running { background: #263247; color: #eef3fa; }
+
+.photo-button {
+  min-width: 116px;
+  border: 1px solid #3b4b64;
+  background: #1b2638;
+  color: #f4f8ff;
+}
+.photo-button:not(:disabled):active { transform: translateY(1px); }
+.camera-button:disabled, .photo-button:disabled { opacity: 0.48; cursor: wait; }
+
+.photo-info {
+  min-height: 1.15em;
+  margin: 8px 3px 0;
+  color: #aab7ca;
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
 
 .status {
   min-height: 1.35em;
-  margin: 11px 3px 1px;
+  margin: 9px 3px 1px;
   color: var(--muted);
   font-size: 0.88rem;
 }
@@ -183,6 +220,11 @@ h1 { margin-bottom: 0; font-size: clamp(1.65rem, 7vw, 2.4rem); line-height: 1; }
   color: var(--muted);
   font-size: 0.82rem;
   line-height: 1.5;
+}
+
+@media (max-width: 420px) {
+  .camera-actions { grid-template-columns: 1fr; }
+  .photo-button { width: 100%; }
 }
 
 @media (min-width: 700px) {
