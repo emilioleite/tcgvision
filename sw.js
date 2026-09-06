@@ -1,4 +1,4 @@
-const CACHE_NAME = "tcgvision-shell-v5";
+const CACHE_NAME = "tcgvision-shell-v6";
 const SHELL = [
   "./",
   "./index.html",
