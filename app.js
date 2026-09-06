@@ -14,14 +14,13 @@ const diagCardIdEl = document.querySelector("#diag-card-id");
 
 const MATCH_THRESHOLD = 0.45;
 const SPEECH_LANGUAGE = "pt-BR";
+const CLEAR_FRAMES_TO_REARM = 2;
 
 const COLLECTORVISION_BASE = new URL("./collectorvision/", window.location.href);
 const COLLECTORVISION_MANIFEST = new URL("assets/manifest.json", COLLECTORVISION_BASE).href;
 const COLLECTORVISION_ASSETS = new URL("assets", COLLECTORVISION_BASE).href.replace(/\/$/, "");
 const COLLECTORVISION_WORKER = new URL("scanner.worker.mjs", COLLECTORVISION_BASE).href;
 
-// Região real analisada pelo modelo. Ela é propositalmente um pouco maior
-// que a moldura visível para o jogador não precisar encaixar a carta exatamente.
 const CAPTURE_REGION = {
   x: 0.30,
   y: 0.04,
@@ -34,6 +33,9 @@ let starting = false;
 let lookupSequence = 0;
 let lastNarratedKey = "";
 let lastNarratedAt = 0;
+let narrationLocked = false;
+let awaitingCardRemoval = false;
+let clearFrameCount = 0;
 
 function setStatus(message, { error = false } = {}) {
   statusEl.textContent = message;
@@ -205,11 +207,26 @@ function selectPortugueseVoice() {
     || null;
 }
 
-function speakPortuguese(text) {
-  if (!("speechSynthesis" in window) || typeof SpeechSynthesisUtterance === "undefined") return;
-  if (!text) return;
+function releaseNarrationLock() {
+  narrationLocked = false;
+  if (clearFrameCount >= CLEAR_FRAMES_TO_REARM) {
+    awaitingCardRemoval = false;
+    setStatus("Pronto para a próxima carta.");
+  } else {
+    setStatus("Remova a carta para ler a próxima.");
+  }
+}
 
-  window.speechSynthesis.cancel();
+function speakPortuguese(text) {
+  if (!("speechSynthesis" in window) || typeof SpeechSynthesisUtterance === "undefined") {
+    releaseNarrationLock();
+    return;
+  }
+  if (!text) {
+    releaseNarrationLock();
+    return;
+  }
+
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = SPEECH_LANGUAGE;
   utterance.rate = 0.95;
@@ -217,6 +234,13 @@ function speakPortuguese(text) {
 
   const voice = selectPortugueseVoice();
   if (voice) utterance.voice = voice;
+
+  utterance.onstart = () => {
+    narrationLocked = true;
+    setStatus("Narrando carta…");
+  };
+  utterance.onend = releaseNarrationLock;
+  utterance.onerror = releaseNarrationLock;
 
   window.speechSynthesis.speak(utterance);
 }
@@ -251,22 +275,36 @@ async function findPortuguesePrinting(data) {
 }
 
 async function narrateCard(data, fallbackCardId) {
+  if (narrationLocked || window.speechSynthesis?.speaking || window.speechSynthesis?.pending) return;
+
   const key = String(data?.oracle_id || data?.id || fallbackCardId || data?.name || "");
   const now = Date.now();
   if (key && key === lastNarratedKey && now - lastNarratedAt < 12000) return;
 
+  // Trava antes da busca da impressão em português para impedir corridas entre scans.
+  narrationLocked = true;
   lastNarratedKey = key;
   lastNarratedAt = now;
 
-  const portugueseCard = await findPortuguesePrinting(data);
-  const narration = portugueseCard
-    ? narrationForCard(portugueseCard, { officialPortuguese: true })
-    : narrationForCard(data, { officialPortuguese: false });
+  try {
+    const portugueseCard = await findPortuguesePrinting(data);
+    const narration = portugueseCard
+      ? narrationForCard(portugueseCard, { officialPortuguese: true })
+      : narrationForCard(data, { officialPortuguese: false });
 
-  speakPortuguese(narration);
+    speakPortuguese(narration);
+  } catch (error) {
+    console.warn("Falha ao preparar narração:", error);
+    releaseNarrationLock();
+  }
 }
 
 async function showDetectedCard(card) {
+  if (narrationLocked || awaitingCardRemoval) return;
+
+  awaitingCardRemoval = true;
+  clearFrameCount = 0;
+
   const sequence = ++lookupSequence;
   setStatus("Carta reconhecida. Buscando os dados…");
 
@@ -282,10 +320,10 @@ async function showDetectedCard(card) {
     cardSetEl.textContent = `${setName}${collectorNumber}`.trim();
     cardConfidenceEl.textContent = `${Math.round(card.score * 100)}%`;
     resultEl.hidden = false;
-    setStatus("Pronto para a próxima carta.");
     narrateCard(data, card.cardId);
   } catch (error) {
     if (sequence !== lookupSequence) return;
+    awaitingCardRemoval = false;
     cardNameEl.textContent = card.cardId;
     cardSetEl.textContent = "Identificada, mas não foi possível consultar o nome no Scryfall.";
     cardConfidenceEl.textContent = `${Math.round(card.score * 100)}%`;
@@ -329,6 +367,27 @@ async function ensureScanner() {
     onResult(data) {
       updateDiagnostics(data);
 
+      if (data?.cardPresent) {
+        clearFrameCount = 0;
+      } else {
+        clearFrameCount += 1;
+        if (!narrationLocked && awaitingCardRemoval && clearFrameCount >= CLEAR_FRAMES_TO_REARM) {
+          awaitingCardRemoval = false;
+          setStatus("Pronto para a próxima carta.");
+          return;
+        }
+      }
+
+      if (narrationLocked) {
+        setStatus("Narrando carta…");
+        return;
+      }
+
+      if (awaitingCardRemoval) {
+        setStatus("Remova a carta para ler a próxima.");
+        return;
+      }
+
       if (!data?.cardPresent) {
         setStatus("Aguardando uma carta dentro da moldura…");
       } else if (!data?.cornersValid) {
@@ -339,6 +398,7 @@ async function ensureScanner() {
     },
     onCardDetected(card) {
       updateDiagnostics(card.raw || card);
+      if (narrationLocked || awaitingCardRemoval) return;
       showDetectedCard(card);
     },
     onError({ message }) {
@@ -355,6 +415,9 @@ button.addEventListener("click", async () => {
   if (scanner?.started) {
     scanner.stop();
     window.speechSynthesis?.cancel?.();
+    narrationLocked = false;
+    awaitingCardRemoval = false;
+    clearFrameCount = 0;
     setRunningUi(false);
     setStatus("Câmera parada.");
     return;
