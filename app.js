@@ -14,6 +14,11 @@ const diagCardIdEl = document.querySelector("#diag-card-id");
 
 const MATCH_THRESHOLD = 0.45;
 
+const COLLECTORVISION_BASE = new URL("./collectorvision/", window.location.href);
+const COLLECTORVISION_MANIFEST = new URL("assets/manifest.json", COLLECTORVISION_BASE).href;
+const COLLECTORVISION_ASSETS = new URL("assets", COLLECTORVISION_BASE).href.replace(/\/$/, "");
+const COLLECTORVISION_WORKER = new URL("scanner.worker.mjs", COLLECTORVISION_BASE).href;
+
 // Região real analisada pelo modelo. Ela é propositalmente um pouco maior
 // que a moldura visível para o jogador não precisar encaixar a carta exatamente.
 const CAPTURE_REGION = {
@@ -148,9 +153,9 @@ async function ensureScanner() {
 
   scanner = await createCollectorVisionScannerApplet({
     target: "#scanner",
-    manifestUrl: "./collectorvision/assets/manifest.json",
-    assetBasePath: "./collectorvision/assets",
-    workerUrl: "./collectorvision/scanner.worker.mjs",
+    manifestUrl: COLLECTORVISION_MANIFEST,
+    assetBasePath: COLLECTORVISION_ASSETS,
+    workerUrl: COLLECTORVISION_WORKER,
     autoStart: false,
     enableWebGpu: false,
     scanIntervalMs: 400,
@@ -225,7 +230,7 @@ button.addEventListener("click", async () => {
     const missingAssets = /manifest|404|fetch/i.test(message);
     setStatus(
       missingAssets
-        ? "Runtime do CollectorVision não encontrado. Execute scripts/prepare-collectorvision.sh antes de servir o app."
+        ? "Não foi possível carregar os modelos do CollectorVision. Atualize a página e tente novamente."
         : message,
       { error: true },
     );
