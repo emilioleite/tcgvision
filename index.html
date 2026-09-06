@@ -41,13 +41,13 @@
 
       <div class="camera-actions">
         <button id="camera-button" class="camera-button" type="button">Iniciar câmera</button>
-        <button id="photo-button" class="photo-button" type="button" disabled>📷 Foto HD</button>
+        <button id="photo-button" class="photo-button" type="button">📷 Abrir câmera / Foto HD</button>
       </div>
       <input id="photo-input" class="visually-hidden" type="file" accept="image/*" capture="environment">
-      <p id="photo-info" class="photo-info"></p>
+      <p id="photo-info" class="photo-info">Foto HD abre a câmera nativa e usa a imagem inteira em resolução fotográfica.</p>
 
       <p id="status" class="status" role="status" aria-live="polite">
-        Toque em “Iniciar câmera” para começar.
+        Use o modo automático ou toque em “Abrir câmera / Foto HD”.
       </p>
     </section>
 
@@ -70,10 +70,10 @@
     </section>
 
     <p class="hint">
-      A leitura automática usa o vídeo. Em aparelhos com preview ruim, use <strong>Foto HD</strong>: o app tenta fotografar na maior resolução disponível e usa essa imagem no reconhecimento.
+      Em aparelhos com vídeo ruim, use <strong>Abrir câmera / Foto HD</strong>. A câmera nativa ocupa a tela toda; fotografe a carta inteira e tente fazê-la ocupar boa parte da imagem. O reconhecimento usa a foto completa, sem recorte central.
     </p>
   </main>
 
-  <script type="module" src="./app.js?v=14"></script>
+  <script type="module" src="./app.js?v=15"></script>
 </body>
 </html>
