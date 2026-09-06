@@ -8,7 +8,7 @@
   <title>TCG Vision</title>
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="./styles.css?v=11">
+  <link rel="stylesheet" href="./styles.css?v=14">
   <script>
     (async () => {
       if (!("serviceWorker" in navigator)) return;
@@ -39,7 +39,12 @@
         </div>
       </div>
 
-      <button id="camera-button" class="camera-button" type="button">Iniciar câmera</button>
+      <div class="camera-actions">
+        <button id="camera-button" class="camera-button" type="button">Iniciar câmera</button>
+        <button id="photo-button" class="photo-button" type="button" disabled>📷 Foto HD</button>
+      </div>
+      <input id="photo-input" class="visually-hidden" type="file" accept="image/*" capture="environment">
+      <p id="photo-info" class="photo-info"></p>
 
       <p id="status" class="status" role="status" aria-live="polite">
         Toque em “Iniciar câmera” para começar.
@@ -65,10 +70,10 @@
     </section>
 
     <p class="hint">
-      Não precisa encaixar a carta nas bordas. Basta deixá-la inteira dentro da moldura e segurá-la por um instante; o app captura a região automaticamente.
+      A leitura automática usa o vídeo. Em aparelhos com preview ruim, use <strong>Foto HD</strong>: o app tenta fotografar na maior resolução disponível e usa essa imagem no reconhecimento.
     </p>
   </main>
 
-  <script type="module" src="./app.js?v=13"></script>
+  <script type="module" src="./app.js?v=14"></script>
 </body>
 </html>
