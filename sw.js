@@ -1,9 +1,9 @@
-const CACHE_NAME = "tcgvision-shell-v12";
+const CACHE_NAME = "tcgvision-shell-v13";
 const SHELL = [
   "./",
   "./index.html",
   "./styles.css?v=11",
-  "./app.js?v=12",
+  "./app.js?v=13",
   "./manifest.webmanifest",
   "./icon.svg",
 ];
@@ -30,10 +30,8 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
-  // Modelos/runtime têm cache próprio no CollectorVision/IndexedDB.
   if (url.pathname.includes("/collectorvision/")) return;
 
-  // Durante o MVP, prioriza sempre a rede para não prender código antigo.
   event.respondWith(
     fetch(request)
       .then((response) => {
