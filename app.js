@@ -13,6 +13,7 @@ const diagMatchScoreEl = document.querySelector("#diag-match-score");
 const diagCardIdEl = document.querySelector("#diag-card-id");
 
 const MATCH_THRESHOLD = 0.45;
+const SPEECH_LANGUAGE = "pt-BR";
 
 const COLLECTORVISION_BASE = new URL("./collectorvision/", window.location.href);
 const COLLECTORVISION_MANIFEST = new URL("assets/manifest.json", COLLECTORVISION_BASE).href;
@@ -65,17 +66,6 @@ function updateDiagnostics(data = {}) {
   diagCardIdEl.textContent = data.cardId || "—";
 }
 
-function speechLanguageForCard(data) {
-  const lang = String(data?.lang ?? "en").toLowerCase();
-  if (lang === "pt") return "pt-BR";
-  if (lang === "es") return "es-ES";
-  if (lang === "fr") return "fr-FR";
-  if (lang === "de") return "de-DE";
-  if (lang === "it") return "it-IT";
-  if (lang === "ja") return "ja-JP";
-  return "en-US";
-}
-
 function cleanForSpeech(value) {
   return String(value ?? "")
     .replace(/[{}]/g, " ")
@@ -85,44 +75,200 @@ function cleanForSpeech(value) {
     .trim();
 }
 
-function narrationForCard(data) {
+function manaForSpeech(value) {
+  const mana = String(value ?? "");
+  if (!mana) return "";
+
+  const symbols = [...mana.matchAll(/\{([^}]+)\}/g)].map((match) => match[1]);
+  if (!symbols.length) return cleanForSpeech(mana);
+
+  const names = {
+    W: "uma mana branca",
+    U: "uma mana azul",
+    B: "uma mana preta",
+    R: "uma mana vermelha",
+    G: "uma mana verde",
+    C: "uma mana incolor",
+    X: "X",
+  };
+
+  return symbols.map((symbol) => {
+    if (names[symbol]) return names[symbol];
+    if (/^\d+$/.test(symbol)) {
+      const amount = Number(symbol);
+      return amount === 1 ? "uma mana genérica" : `${amount} manas genéricas`;
+    }
+    if (symbol.includes("/")) {
+      return symbol.split("/").map((part) => names[part] || part).join(" ou ");
+    }
+    return symbol;
+  }).join(", ");
+}
+
+function portugueseTypeLine(typeLine) {
+  let text = String(typeLine ?? "");
+  const replacements = [
+    ["Legendary", "Lendário"],
+    ["Basic", "Básico"],
+    ["Snow", "Nevado"],
+    ["Creature", "Criatura"],
+    ["Artifact", "Artefato"],
+    ["Enchantment", "Encantamento"],
+    ["Instant", "Mágica instantânea"],
+    ["Sorcery", "Feitiço"],
+    ["Planeswalker", "Planeswalker"],
+    ["Land", "Terreno"],
+    ["Battle", "Batalha"],
+    ["Equipment", "Equipamento"],
+    ["Vehicle", "Veículo"],
+    ["Aura", "Aura"],
+    ["Saga", "Saga"],
+    ["Token", "Ficha"],
+  ];
+
+  for (const [from, to] of replacements) {
+    text = text.replace(new RegExp(`\\b${from}\\b`, "gi"), to);
+  }
+  return text;
+}
+
+function localRulesSummary(oracleText) {
+  const source = String(oracleText ?? "");
+  if (!source) return "";
+
+  const parts = [];
+  const keywordMap = [
+    [/\bflying\b/i, "Tem voar."],
+    [/\bvigilance\b/i, "Tem vigilância."],
+    [/\btrample\b/i, "Tem atropelar."],
+    [/\bhaste\b/i, "Tem ímpeto."],
+    [/\bdeathtouch\b/i, "Tem toque mortífero."],
+    [/\blifelink\b/i, "Tem vínculo com a vida."],
+    [/\breach\b/i, "Tem alcance."],
+    [/\bmenace\b/i, "Tem ameaçar."],
+    [/\bfirst strike\b/i, "Tem iniciativa."],
+    [/\bdouble strike\b/i, "Tem golpe duplo."],
+    [/\bhexproof\b/i, "Não pode ser alvo de mágicas ou habilidades controladas pelos oponentes."],
+    [/\bindestructible\b/i, "É indestrutível."],
+  ];
+
+  for (const [pattern, sentence] of keywordMap) {
+    if (pattern.test(source)) parts.push(sentence);
+  }
+
+  const damage = source.match(/deals? (\d+) damage to any target/i);
+  if (damage) parts.push(`Causa ${damage[1]} pontos de dano a qualquer alvo.`);
+
+  const gainLife = source.match(/you gain (\d+) life/i);
+  if (gainLife) parts.push(`Você ganha ${gainLife[1]} pontos de vida.`);
+
+  if (/draw a card/i.test(source)) parts.push("Você compra uma carta.");
+  if (/draw two cards/i.test(source)) parts.push("Você compra duas cartas.");
+  if (/destroy target/i.test(source)) parts.push("Possui um efeito que destrói um alvo.");
+  if (/exile target/i.test(source)) parts.push("Possui um efeito que exila um alvo.");
+  if (/create .* token/i.test(source)) parts.push("Possui um efeito que cria uma ficha.");
+  if (/when .* enters/i.test(source) || /when this .* enters/i.test(source)) {
+    parts.push("Possui uma habilidade que é ativada quando entra no campo de batalha.");
+  }
+  if (/whenever/i.test(source)) parts.push("Possui uma habilidade desencadeada.");
+  if (/\{T\}:/i.test(source)) parts.push("Possui uma habilidade ativada ao virar a carta.");
+
+  if (!parts.length) {
+    return "Esta carta possui texto de regras adicional, mas não encontrei uma impressão oficial em português para narrá-lo com segurança.";
+  }
+
+  return [...new Set(parts)].join(" ");
+}
+
+function narrationForCard(data, { officialPortuguese = false } = {}) {
   const name = data.printed_name || data.name || "Carta reconhecida";
-  const mana = cleanForSpeech(data.mana_cost);
-  const typeLine = data.printed_type_line || data.type_line || "";
-  const text = data.printed_text || data.oracle_text || "";
+  const mana = manaForSpeech(data.mana_cost);
+  const typeLine = officialPortuguese
+    ? (data.printed_type_line || data.type_line || "")
+    : portugueseTypeLine(data.type_line || "");
+  const rulesText = officialPortuguese
+    ? (data.printed_text || data.oracle_text || "")
+    : localRulesSummary(data.oracle_text || "");
 
   return [
     cleanForSpeech(name),
-    mana ? `Mana ${mana}` : "",
-    cleanForSpeech(typeLine),
-    cleanForSpeech(text),
+    mana ? `Custo de mana: ${mana}` : "",
+    typeLine ? `Tipo: ${cleanForSpeech(typeLine)}` : "",
+    cleanForSpeech(rulesText),
   ].filter(Boolean).join(". ");
 }
 
-function narrateCard(data, fallbackCardId) {
-  if (!("speechSynthesis" in window) || typeof SpeechSynthesisUtterance === "undefined") return;
+function selectPortugueseVoice() {
+  const voices = window.speechSynthesis?.getVoices?.() ?? [];
+  return voices.find((voice) => String(voice.lang).toLowerCase() === "pt-br")
+    || voices.find((voice) => String(voice.lang).toLowerCase().startsWith("pt"))
+    || null;
+}
 
+function speakPortuguese(text) {
+  if (!("speechSynthesis" in window) || typeof SpeechSynthesisUtterance === "undefined") return;
+  if (!text) return;
+
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = SPEECH_LANGUAGE;
+  utterance.rate = 0.95;
+  utterance.pitch = 1;
+
+  const voice = selectPortugueseVoice();
+  if (voice) utterance.voice = voice;
+
+  window.speechSynthesis.speak(utterance);
+}
+
+function escapeScryfallQuotedName(name) {
+  return String(name ?? "").replace(/(["\\])/g, "\\$1");
+}
+
+async function findPortuguesePrinting(data) {
+  if (String(data?.lang ?? "").toLowerCase() === "pt" && (data?.printed_text || data?.printed_type_line)) {
+    return data;
+  }
+
+  const name = String(data?.name ?? "").trim();
+  if (!name) return null;
+
+  try {
+    const query = `!\"${escapeScryfallQuotedName(name)}\" lang:pt`;
+    const url = new URL("https://api.scryfall.com/cards/search");
+    url.searchParams.set("q", query);
+    url.searchParams.set("unique", "prints");
+    url.searchParams.set("order", "released");
+    url.searchParams.set("dir", "desc");
+
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    const result = await response.json();
+    return Array.isArray(result?.data) ? (result.data[0] || null) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function narrateCard(data, fallbackCardId) {
   const key = String(data?.oracle_id || data?.id || fallbackCardId || data?.name || "");
   const now = Date.now();
   if (key && key === lastNarratedKey && now - lastNarratedAt < 12000) return;
 
-  const text = narrationForCard(data);
-  if (!text) return;
-
   lastNarratedKey = key;
   lastNarratedAt = now;
 
-  window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = speechLanguageForCard(data);
-  utterance.rate = 0.95;
-  utterance.pitch = 1;
-  window.speechSynthesis.speak(utterance);
+  const portugueseCard = await findPortuguesePrinting(data);
+  const narration = portugueseCard
+    ? narrationForCard(portugueseCard, { officialPortuguese: true })
+    : narrationForCard(data, { officialPortuguese: false });
+
+  speakPortuguese(narration);
 }
 
 async function showDetectedCard(card) {
   const sequence = ++lookupSequence;
-  setStatus("Carta reconhecida. Buscando o nome…");
+  setStatus("Carta reconhecida. Buscando os dados…");
 
   try {
     const response = await fetch(`https://api.scryfall.com/cards/${encodeURIComponent(card.cardId)}`);
