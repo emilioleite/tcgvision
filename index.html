@@ -8,19 +8,23 @@
   <title>TCG Vision</title>
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="./styles.css?v=14">
+  <link rel="stylesheet" href="./styles.css?v=19">
   <script>
     (async () => {
       if (!("serviceWorker" in navigator)) return;
       const params = new URLSearchParams(location.search);
       if (params.get("fresh") !== "1") return;
+
       const regs = await navigator.serviceWorker.getRegistrations();
       await Promise.all(regs.map((reg) => reg.unregister()));
       const keys = await caches.keys();
       await Promise.all(keys.filter((key) => key.startsWith("tcgvision-")).map((key) => caches.delete(key)));
+
+      params.delete("fresh");
+      const cleanUrl = `${location.pathname}${params.size ? `?${params}` : ""}${location.hash}`;
+      location.replace(cleanUrl);
     })().catch(console.warn);
   </script>
-  <script src="./visibility-guard.js?v=18"></script>
 </head>
 <body>
   <main class="app-shell">
@@ -29,7 +33,7 @@
         <p class="eyebrow">MVP</p>
         <h1>TCG Vision</h1>
       </div>
-      <span class="badge">Magic</span>
+      <span class="badge">Magic · v19</span>
     </header>
 
     <section class="scanner-card" aria-label="Scanner de carta">
@@ -41,14 +45,17 @@
       </div>
 
       <div class="camera-actions">
-        <button id="camera-button" class="camera-button" type="button">Iniciar câmera</button>
+        <usermedia id="camera-control">
+          <button id="camera-permission-button" class="camera-button" type="button">Iniciar câmera</button>
+        </usermedia>
+        <button id="camera-button" class="visually-hidden" type="button" tabindex="-1" aria-hidden="true">Controle interno da câmera</button>
         <button id="photo-button" class="photo-button" type="button">📷 Abrir câmera / Foto HD</button>
       </div>
       <input id="photo-input" class="visually-hidden" type="file" accept="image/*" capture="environment">
       <p id="photo-info" class="photo-info">Foto HD abre a câmera nativa e usa a imagem inteira em resolução fotográfica.</p>
 
       <p id="status" class="status" role="status" aria-live="polite">
-        Use o modo automático ou toque em “Abrir câmera / Foto HD”.
+        A câmera só é ativada após um toque explícito em “Iniciar câmera”.
       </p>
     </section>
 
@@ -71,10 +78,11 @@
     </section>
 
     <p class="hint">
-      Em aparelhos com vídeo ruim, use <strong>Abrir câmera / Foto HD</strong>. A câmera nativa ocupa a tela toda; fotografe a carta inteira e tente fazê-la ocupar boa parte da imagem. O reconhecimento usa a foto completa, sem recorte central.
+      No Chrome 151 ou superior, o próprio navegador controla a aquisição da câmera. Ao sair da aba, o stream é encerrado e um novo toque é necessário para ativá-lo novamente. Em aparelhos com vídeo ruim, use <strong>Abrir câmera / Foto HD</strong>.
     </p>
   </main>
 
-  <script type="module" src="./app.js?v=15"></script>
+  <script src="./camera-broker.js?v=19"></script>
+  <script type="module" src="./app.js?v=19"></script>
 </body>
 </html>
