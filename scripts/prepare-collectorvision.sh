@@ -27,7 +27,7 @@ curl -fsSL "${RAW_BASE}/lib/collectorvision-scanner-applet.mjs" -o "${TARGET_DIR
 curl -fsSL "${RAW_BASE}/lib/collectorvision-catalog-v2.mjs" -o "${TARGET_DIR}/lib/collectorvision-catalog-v2.mjs"
 curl -fsSL "https://raw.githubusercontent.com/${UPSTREAM_REPO}/${UPSTREAM_REF}/LICENSE" -o "${TARGET_DIR}/LICENSE"
 
-echo "Aplicando suporte à região central e fotos de alta resolução…"
+echo "Aplicando suporte à região central, fotos HD e ciclo de vida PWA…"
 python3 - "${TARGET_DIR}/lib/collectorvision-scanner-applet.mjs" <<'PY'
 from pathlib import Path
 import sys
@@ -138,11 +138,126 @@ scan_method = '''  async scanBitmap(bitmap) {
   async tick() {
 '''
 
+old_mount = '''    this.elements = this.createElements();
+    this.mount();
+  }
+'''
+
+new_mount = '''    this.elements = this.createElements();
+    this.mount();
+
+    // Em PWA/mobile, visibilitychange:hidden é o último evento confiável
+    // antes de o app ir para segundo plano. O próprio scanner possui a
+    // referência exata do MediaStream, então encerra a câmera diretamente.
+    this.onVisibilityChange = () => {
+      if (document.visibilityState === "hidden" && this.started) {
+        this.stop("hidden");
+      }
+    };
+    this.onFreeze = () => {
+      if (this.started) this.stop("freeze");
+    };
+    this.onPageHide = () => {
+      if (this.started) this.stop("pagehide");
+    };
+
+    document.addEventListener("visibilitychange", this.onVisibilityChange, { capture: true });
+    document.addEventListener("freeze", this.onFreeze, { capture: true });
+    window.addEventListener("pagehide", this.onPageHide, { capture: true });
+  }
+'''
+
+old_stop = '''  stop() {
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+    if (this.previewFrame) {
+      cancelAnimationFrame(this.previewFrame);
+      this.previewFrame = null;
+    }
+    this.started = false;
+    this.workerBusy = false;
+    this.lastFpsTimestamp = null;
+    this.fpsEma = null;
+    for (const track of this.stream?.getTracks?.() ?? []) {
+      track.stop();
+    }
+    this.stream = null;
+    this.elements.video.srcObject = null;
+    this.setStatus("Stopped.");
+  }
+'''
+
+new_stop = '''  stop(reason = "manual") {
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+    if (this.previewFrame) {
+      cancelAnimationFrame(this.previewFrame);
+      this.previewFrame = null;
+    }
+
+    const stream = this.stream;
+    this.started = false;
+    this.workerBusy = false;
+    this.lastFpsTimestamp = null;
+    this.fpsEma = null;
+    this.stream = null;
+
+    try {
+      this.elements.video.pause();
+      this.elements.video.srcObject = null;
+    } catch {
+      // Sem ação: ainda encerramos as tracks abaixo.
+    }
+
+    for (const track of stream?.getTracks?.() ?? []) {
+      try {
+        if (track.readyState !== "ended") track.stop();
+      } catch {
+        // Ignora uma track que já tenha sido finalizada pelo navegador.
+      }
+    }
+
+    this.setStatus("Stopped.");
+
+    if (reason !== "manual" && reason !== "dispose") {
+      window.dispatchEvent(new CustomEvent("tcgvision-camera-stopped", {
+        detail: { reason },
+      }));
+    }
+  }
+'''
+
+old_dispose = '''  dispose() {
+    this.stop();
+    this.worker?.terminate();
+    this.worker = null;
+    this.target.replaceChildren();
+  }
+'''
+
+new_dispose = '''  dispose() {
+    this.stop("dispose");
+    document.removeEventListener("visibilitychange", this.onVisibilityChange, true);
+    document.removeEventListener("freeze", this.onFreeze, true);
+    window.removeEventListener("pagehide", this.onPageHide, true);
+    this.worker?.terminate();
+    this.worker = null;
+    this.target.replaceChildren();
+  }
+'''
+
 for old, new, label in [
     (old_capture, new_capture, "drawCaptureFrame"),
     (old_resize, new_resize, "resizeCanvas"),
     (old_overlay, new_overlay, "drawOverlay"),
     ("  async tick() {\n", scan_method, "scanBitmap"),
+    (old_mount, new_mount, "lifecycle setup"),
+    (old_stop, new_stop, "stop lifecycle"),
+    (old_dispose, new_dispose, "dispose lifecycle"),
 ]:
     if old not in text:
         raise SystemExit(f"CollectorVision upstream mudou: trecho {label} não encontrado")
