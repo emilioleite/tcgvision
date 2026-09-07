@@ -1,10 +1,10 @@
-const CACHE_NAME = "tcgvision-shell-v21";
+const CACHE_NAME = "tcgvision-shell-v22";
 const SHELL = [
   "./",
   "./index.html",
   "./styles.css?v=19",
   "./app.js?v=20",
-  "./camera-lifecycle-ui.js?v=21",
+  "./camera-lifecycle-ui.js?v=22",
   "./manifest.webmanifest",
   "./icon.svg",
 ];
