@@ -1,9 +1,14 @@
 (() => {
   const activeStreams = new Set();
   let stopping = false;
+  let nativePhotoFlowUntil = 0;
 
   function pageIsActive() {
     return document.visibilityState === "visible" && document.hasFocus();
+  }
+
+  function nativePhotoFlowActive() {
+    return Date.now() < nativePhotoFlowUntil;
   }
 
   function rememberStream(stream) {
@@ -18,8 +23,8 @@
 
     stream.getTracks().forEach((track) => track.addEventListener("ended", forget, { once: true }));
 
-    // Se o pedido terminou depois de a página já ter ido para segundo plano,
-    // não deixe a câmera chegar a permanecer aberta.
+    // Se getUserMedia terminar depois de a página já ter perdido foco,
+    // encerra a câmera antes de devolver o stream ao scanner.
     if (!pageIsActive()) {
       stream.getTracks().forEach((track) => track.stop());
       activeStreams.delete(stream);
@@ -32,29 +37,63 @@
   if (mediaDevices?.getUserMedia) {
     const originalGetUserMedia = mediaDevices.getUserMedia.bind(mediaDevices);
 
-    mediaDevices.getUserMedia = async (...args) => {
-      const stream = await originalGetUserMedia(...args);
-      return rememberStream(stream);
-    };
+    try {
+      mediaDevices.getUserMedia = async (...args) => {
+        const stream = await originalGetUserMedia(...args);
+        return rememberStream(stream);
+      };
+    } catch (error) {
+      console.warn("Não foi possível envolver getUserMedia:", error);
+    }
+  }
+
+  function stopStream(stream) {
+    if (!(stream instanceof MediaStream)) return;
+    for (const track of stream.getTracks()) {
+      try {
+        if (track.readyState !== "ended") track.stop();
+      } catch (error) {
+        console.warn("Falha ao parar track de câmera:", error);
+      }
+    }
   }
 
   function stopAllKnownStreams() {
-    for (const stream of activeStreams) {
-      for (const track of stream.getTracks()) {
-        if (track.readyState !== "ended") track.stop();
-      }
-    }
+    for (const stream of activeStreams) stopStream(stream);
     activeStreams.clear();
 
-    // Também cobre streams criados antes deste script em algum cache antigo.
+    // Segunda via: encerra qualquer stream ainda ligado a elementos de vídeo.
     document.querySelectorAll("video").forEach((video) => {
-      const stream = video.srcObject;
-      if (!(stream instanceof MediaStream)) return;
-      stream.getTracks().forEach((track) => {
-        if (track.readyState !== "ended") track.stop();
-      });
-      video.srcObject = null;
+      stopStream(video.srcObject);
+      try {
+        video.pause?.();
+        video.srcObject = null;
+        video.removeAttribute("src");
+        video.load?.();
+      } catch (error) {
+        console.warn("Falha ao limpar vídeo da câmera:", error);
+      }
     });
+  }
+
+  function markCameraSessionReset() {
+    try {
+      sessionStorage.setItem("tcg-camera-session-reset", "1");
+    } catch {
+      // sessionStorage pode estar indisponível em alguns modos privados.
+    }
+  }
+
+  function hardResetPageSession() {
+    markCameraSessionReset();
+
+    // O reload é intencional: descarrega por completo o documento que possuía
+    // o MediaStream. A página nova não chama getUserMedia automaticamente.
+    try {
+      window.location.reload();
+    } catch (error) {
+      console.warn("Falha ao reiniciar sessão da página:", error);
+    }
   }
 
   function stopCameraIfNeeded() {
@@ -64,11 +103,11 @@
     try {
       stopAllKnownStreams();
 
-      // Mantém a UI sincronizada quando possível, mas o encerramento da câmera
-      // não depende mais deste clique.
-      const cameraButton = document.querySelector("#camera-button");
-      if (cameraButton?.classList.contains("is-running")) {
-        cameraButton.click();
+      // Abrir o input capture também oculta a página. Nesse caso encerramos
+      // qualquer stream de vídeo automático, mas preservamos o documento para
+      // que a foto escolhida possa retornar ao <input type=file>.
+      if (!nativePhotoFlowActive()) {
+        hardResetPageSession();
       }
     } finally {
       queueMicrotask(() => {
@@ -77,12 +116,39 @@
     }
   }
 
+  // Marca o fluxo de Foto HD antes que o navegador abra a câmera nativa.
+  document.addEventListener("click", (event) => {
+    const target = event.target instanceof Element ? event.target.closest("#photo-button") : null;
+    if (target) nativePhotoFlowUntil = Date.now() + 120000;
+  }, true);
+
+  document.addEventListener("change", (event) => {
+    if (event.target?.id === "photo-input") nativePhotoFlowUntil = 0;
+  }, true);
+
+  document.addEventListener("cancel", (event) => {
+    if (event.target?.id === "photo-input") nativePhotoFlowUntil = 0;
+  }, true);
+
   document.addEventListener("visibilitychange", stopCameraIfNeeded, { passive: true });
   window.addEventListener("blur", stopCameraIfNeeded, { passive: true });
   window.addEventListener("pagehide", stopCameraIfNeeded, { passive: true });
-  window.addEventListener("beforeunload", stopCameraIfNeeded, { passive: true });
+  window.addEventListener("beforeunload", stopAllKnownStreams, { passive: true });
   window.addEventListener("freeze", stopCameraIfNeeded, { passive: true });
 
-  // Fallback para navegadores móveis que atrasam algum dos eventos acima.
-  window.setInterval(stopCameraIfNeeded, 250);
+  // Fallback para navegadores móveis que atrasam eventos de lifecycle.
+  window.setInterval(stopCameraIfNeeded, 200);
+
+  window.addEventListener("DOMContentLoaded", () => {
+    try {
+      if (sessionStorage.getItem("tcg-camera-session-reset") !== "1") return;
+      sessionStorage.removeItem("tcg-camera-session-reset");
+      const status = document.querySelector("#status");
+      if (status) {
+        status.textContent = "Câmera desligada porque o app saiu de foco. Toque em “Iniciar câmera” para ativá-la novamente.";
+      }
+    } catch {
+      // Sem ação.
+    }
+  });
 })();
