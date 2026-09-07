@@ -1,12 +1,15 @@
-const CACHE_NAME = "tcgvision-shell-v23";
+const CACHE_NAME = "tcgvision-shell-v24";
 const SHELL = [
   "./",
   "./index.html",
-  "./styles.css?v=19",
+  "./styles.css?v=24",
   "./app.js?v=20",
   "./camera-lifecycle-ui.js?v=23",
+  "./pwa-install.js?v=24",
   "./manifest.webmanifest",
   "./icon.svg",
+  "./icon-192.svg",
+  "./icon-512.svg",
 ];
 
 self.addEventListener("install", (event) => {
