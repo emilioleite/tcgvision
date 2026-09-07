@@ -31,6 +31,14 @@ button, input { font: inherit; }
   margin-bottom: 18px;
 }
 
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .eyebrow, .result-label {
   margin: 0 0 4px;
   color: var(--accent);
@@ -52,6 +60,19 @@ h1 { margin-bottom: 0; font-size: clamp(1.65rem, 7vw, 2.4rem); line-height: 1; }
   font-size: 0.82rem;
   font-weight: 700;
 }
+
+.install-button {
+  padding: 7px 11px;
+  border: 1px solid #376e5c;
+  border-radius: 999px;
+  background: #12382e;
+  color: #c9fae9;
+  font-size: 0.8rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+.install-button[hidden] { display: none; }
+.install-button:disabled { opacity: 0.5; cursor: wait; }
 
 .scanner-card, .result-card, .diagnostics {
   border: 1px solid var(--line);
@@ -222,9 +243,15 @@ h1 { margin-bottom: 0; font-size: clamp(1.65rem, 7vw, 2.4rem); line-height: 1; }
   line-height: 1.5;
 }
 
+@media (max-width: 520px) {
+  .topbar { align-items: flex-start; }
+  .topbar-actions { max-width: 52%; }
+}
+
 @media (max-width: 420px) {
   .camera-actions { grid-template-columns: 1fr; }
   .photo-button { width: 100%; }
+  .install-button { width: 100%; }
 }
 
 @media (min-width: 700px) {
