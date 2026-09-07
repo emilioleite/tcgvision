@@ -20,6 +20,7 @@
       await Promise.all(keys.filter((key) => key.startsWith("tcgvision-")).map((key) => caches.delete(key)));
     })().catch(console.warn);
   </script>
+  <script src="./visibility-guard.js?v=17"></script>
 </head>
 <body>
   <main class="app-shell">
@@ -75,6 +76,5 @@
   </main>
 
   <script type="module" src="./app.js?v=15"></script>
-  <script src="./visibility-guard.js?v=16"></script>
 </body>
 </html>
